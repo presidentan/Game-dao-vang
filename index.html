@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#81d4fa">
+<title>Đào Ruby Cầu Vồng</title>
+<style>
+  html, body {
+    margin: 0; height: 100%; overflow: hidden; background: #81d4fa;
+    touch-action: none; -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    font-family: "Trebuchet MS", "Comic Sans MS", system-ui, sans-serif;
+  }
+  canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; }
+
+  #pull {
+    position: fixed; left: 50%; bottom: max(18px, env(safe-area-inset-bottom));
+    transform: translateX(-50%);
+    width: 96px; height: 96px; border-radius: 50%;
+    border: 6px solid #fff; background: #ff7043; padding: 0;
+    box-shadow: 0 8px 0 #d84315, 0 12px 20px rgba(0,0,0,.3);
+    display: none; place-items: center; cursor: pointer; z-index: 2;
+    transition: transform .08s, box-shadow .08s, opacity .2s;
+  }
+  #pull svg { width: 54px; height: 54px; }
+  #pull:active, #pull.busy {
+    transform: translateX(-50%) translateY(6px);
+    box-shadow: 0 2px 0 #d84315, 0 4px 8px rgba(0,0,0,.3);
+  }
+  #pull.busy { opacity: .7; }
+
+  #start {
+    position: fixed; inset: 0; z-index: 5;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 28px; padding: 20px; text-align: center;
+    background: linear-gradient(#b3e5fc, #fff9c4);
+    transition: opacity .3s;
+  }
+  #start.hide { opacity: 0; pointer-events: none; }
+  #start h1 { margin: 0; font-size: clamp(34px, 8vw, 72px); line-height: 1.1; color: #5d4037; text-shadow: 0 4px 0 rgba(255,255,255,.8); }
+  #gemrow { display: flex; gap: clamp(8px, 2vw, 18px); }
+  #gemrow span {
+    width: clamp(26px, 6vw, 48px); height: clamp(26px, 6vw, 48px);
+    transform: rotate(45deg); border-radius: 22%;
+    border: 3px solid rgba(255,255,255,.8); box-shadow: 0 4px 8px rgba(0,0,0,.25);
+    animation: bob 1.6s ease-in-out infinite;
+  }
+  @keyframes bob { 50% { transform: rotate(45deg) translateY(-8px) translateX(-8px); } }
+  #go {
+    font: inherit; font-size: clamp(30px, 7vw, 56px); font-weight: 700; color: #fff;
+    background: #43a047; border: 6px solid #fff; border-radius: 999px;
+    padding: 12px 56px; cursor: pointer;
+    box-shadow: 0 8px 0 #2e7d32, 0 12px 20px rgba(0,0,0,.25);
+  }
+  #go:active { transform: translateY(6px); box-shadow: 0 2px 0 #2e7d32; }
+  #start p { margin: 0; color: #6d4c41; font-size: clamp(16px, 3.4vw, 22px); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<button id="pull" aria-label="Thả móc xuống">
+  <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 4v15M5 12l7 7 7-7"/>
+  </svg>
+</button>
+
+<div id="start">
+  <h1>Đào Ruby<br>Cầu Vồng</h1>
+  <div id="gemrow"></div>
+  <button id="go">▶ Chơi</button>
+  <p>Nhấn mũi tên ↓ hoặc chạm màn hình để thả móc</p>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  const COLORS = [
+    { say: 'Màu đỏ',         hex: '#e53935', audio: 'audio/red.mp3' },
+    { say: 'Màu cam',        hex: '#fb8c00', audio: 'audio/orange.mp3' },
+    { say: 'Màu vàng',       hex: '#fdd835', audio: 'audio/yellow.mp3' },
+    { say: 'Màu xanh lá',    hex: '#43a047', audio: 'audio/green.mp3' },
+    { say: 'Màu xanh dương', hex: '#1e88e5', audio: 'audio/blue.mp3' },
+    { say: 'Màu chàm',       hex: '#3949ab', audio: 'audio/indigo.mp3' },
+    { say: 'Màu tím',        hex: '#8e24aa', audio: 'audio/violet.mp3' },
+  ];
+
+  const AUDIO_MAP = {
+    'Chơi nào!': 'audio/start.mp3',
+  };
+  COLORS.forEach(c => { AUDIO_MAP[c.say] = c.audio; });
+
+  const gemrow = document.getElementById('gemrow');
+  COLORS.forEach((c, i) => {
+    const s = document.createElement('span');
+    s.style.background = c.hex;
+    s.style.animationDelay = (i * 0.12) + 's';
+    gemrow.appendChild(s);
+  });
+
+  const cv = document.getElementById('c');
+  const ctx = cv.getContext('2d');
+  const btn = document.getElementById('pull');
+  const overlay = document.getElementById('start');
+
+  function shade(hex, amt) {
+    const n = parseInt(hex.slice(1), 16);
+    let r = n >> 16, g = (n >> 8) & 255, b = n & 255;
+    const t = amt < 0 ? 0 : 255, p = Math.abs(amt);
+    r = Math.round((t - r) * p + r);
+    g = Math.round((t - g) * p + g);
+    b = Math.round((t - b) * p + b);
+    return `rgb(${r},${g},${b})`;
+  }
+
+  const BGM_VOL = 0.25;
+  const BGM_DUCK_VOL = 0.08;
+  const bgm = new Audio('audio/bgm.mp3');
+  bgm.loop = true;
+  bgm.volume = BGM_VOL;
+  let bgmStarted = false;
+
+  function startBgm() {
+    if (bgmStarted) return;
+    bgmStarted = true;
+    bgm.play().catch(() => {
+      bgmStarted = false;
+    });
+  }
+
+  let currentAudio = null;
+
+  function speak(text, done) {
+    let called = false;
+    const fin = () => {
+      bgm.volume = BGM_VOL;
+      if (!called) {
+        called = true;
+        if (done) done();
+      }
+    };
+
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio.currentTime = 0;
+      currentAudio = null;
+    }
+
+    const src = AUDIO_MAP[text];
+    if (!src) {
+      setTimeout(fin, 1200);
+      return;
+    }
+
+    bgm.volume = BGM_DUCK_VOL;
+    const el = new Audio(src);
+    currentAudio = el;
+    el.onended = fin;
+    el.onerror = fin;
+    el.play().catch(() => fin());
+    setTimeout(fin, 4500);
+  }
+
+  let W, H, dpr, groundY, ox, oy, S, R, speed;
+  let gems = [], dirt = [];
+  let lastW = 0, lastH = 0;
+
+  function makeDirt() {
+    dirt = [];
+    const n = Math.round((W * H) / 9000);
+    for (let i = 0; i < n; i++) {
+      dirt.push({
+        x: Math.random() * W,
+        y: groundY + 20 + Math.random() * (H - groundY),
+        r: 2 + Math.random() * 6,
+        light: Math.random() < 0.5,
+      });
+    }
+  }
+
+  function spawn(ci, others) {
+    const minY = groundY + 60 * S + R;
+    const maxY = H - R - 12;
+    let pos = null;
+    for (let k = 0; k < 300 && !pos; k++) {
+      const x = R + 12 + Math.random() * (W - 2 * R - 24);
+      const y = minY + Math.random() * Math.max(1, maxY - minY);
+      if (Math.atan2(Math.abs(x - ox), y - oy) > 1.12) continue;
+      if (y > H - 135 && Math.abs(x - W / 2) < 80) continue;
+      if (others.some(o => Math.hypot(o.x - x, o.y - y) < R * 2.8)) continue;
+      pos = { x, y };
+    }
+    if (!pos) pos = { x: ox + (Math.random() - 0.5) * W * 0.5, y: minY + Math.random() * Math.max(1, maxY - minY) };
+    return { ci, x: pos.x, y: pos.y, nx: pos.x / W, ny: pos.y / H, r: R, ph: Math.random() * 6.28 };
+  }
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth; H = window.innerHeight;
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    groundY = Math.max(120, H * 0.2);
+    S = Math.max(0.7, Math.min(1.4, Math.min(W, H) / 520));
+    ox = W / 2; oy = groundY - 6 * S;
+    R = Math.max(22, Math.min(42, Math.min(W, H) * 0.055));
+    speed = Math.max(380, Math.min(W, H) * 0.75);
+    makeDirt();
+
+    const ratioChanged = !lastW || Math.abs((W / H) / (lastW / lastH) - 1) > 0.25;
+    if (ratioChanged || gems.length === 0) {
+      gems = [];
+      COLORS.forEach((_, i) => gems.push(spawn(i, gems)));
+    } else {
+      gems.forEach(g => { g.x = g.nx * W; g.y = g.ny * H; g.r = R; });
+    }
+    lastW = W; lastH = H;
+    carried = null; cel = null; len = 0;
+    setState('swing');
+  }
+
+  const MAXA = 1.22;
+  let started = false;
+  let state = 'swing';
+  let t = 0, ang = 0, len = 0, time = 0;
+  let carried = null, cel = null;
+  let particles = [];
+
+  function setState(s) {
+    state = s;
+    btn.classList.toggle('busy', s !== 'swing');
+  }
+
+  function tip() { return { x: ox + Math.sin(ang) * len, y: oy + Math.cos(ang) * len }; }
+
+  function pull() {
+    if (!started || state !== 'swing') return;
+    len = 0;
+    setState('extend');
+  }
+
+  function startCelebrate() {
+    setState('celebrate');
+    const my = { t: 0, speechDone: false, gem: carried };
+    cel = my;
+    speak(COLORS[carried.ci].say, () => { my.speechDone = true; });
+    const cx = W / 2, cy = H * 0.42, hex = COLORS[carried.ci].hex;
+    for (let i = 0; i < 32; i++) {
+      const a = Math.random() * Math.PI * 2, v = 150 + Math.random() * 300;
+      particles.push({
+        x: cx, y: cy, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 80,
+        life: 1.2, max: 1.2, size: 4 + Math.random() * 6,
+        c: Math.random() < 0.6 ? hex : '#ffffff',
+      });
+    }
+  }
+
+  function update(dt) {
+    if (state === 'swing') {
+      t += dt;
+      ang = MAXA * Math.sin(t * 1.4);
+    } else if (state === 'extend') {
+      len += speed * dt;
+      const p = tip();
+      for (let i = 0; i < gems.length; i++) {
+        const g = gems[i];
+        if (Math.hypot(p.x - g.x, p.y - g.y) < g.r + 14) {
+          carried = g;
+          gems.splice(i, 1);
+          setState('retract');
+          break;
+        }
+      }
+      if (state === 'extend' && (p.x < -5 || p.x > W + 5 || p.y > H + 5)) setState('retract');
+    } else if (state === 'retract') {
+      len -= speed * (carried ? 0.85 : 1.3) * dt;
+      if (len <= 0) {
+        len = 0;
+        if (carried) startCelebrate(); else setState('swing');
+      }
+    } else if (state === 'celebrate') {
+      cel.t += dt;
+      if (cel.t >= 1.8 && cel.speechDone) {
+        gems.push(spawn(cel.gem.ci, gems));
+        carried = null; cel = null;
+        setState('swing');
+      }
+    }
+    for (const p of particles) {
+      p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 420 * dt;
+    }
+    particles = particles.filter(p => p.life > 0);
+  }
+
+  function rr(x, y, w, h, r) {
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x, y, w, h, r); else ctx.rect(x, y, w, h);
+    ctx.fill();
+  }
+  function circle(x, y, r) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
+
+  function drawGem(x, y, r, hex) {
+    ctx.save();
+    ctx.translate(x, y);
+    const P = [[-.6, -.75], [.6, -.75], [1, -.15], [0, 1], [-1, -.15]];
+    ctx.beginPath();
+    P.forEach((p, i) => i ? ctx.lineTo(p[0] * r, p[1] * r) : ctx.moveTo(p[0] * r, p[1] * r));
+    ctx.closePath();
+    const g = ctx.createLinearGradient(-r, -r, r, r);
+    g.addColorStop(0, shade(hex, 0.4));
+    g.addColorStop(0.5, hex);
+    g.addColorStop(1, shade(hex, -0.35));
+    ctx.fillStyle = g; ctx.fill();
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = Math.max(2, r * 0.09);
+    ctx.strokeStyle = shade(hex, -0.5); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,.45)';
+    ctx.lineWidth = Math.max(1, r * 0.05);
+    ctx.beginPath();
+    ctx.moveTo(-r, -.15 * r); ctx.lineTo(r, -.15 * r);
+    ctx.moveTo(-.6 * r, -.75 * r); ctx.lineTo(-.3 * r, -.15 * r); ctx.lineTo(0, r);
+    ctx.moveTo(.6 * r, -.75 * r); ctx.lineTo(.3 * r, -.15 * r); ctx.lineTo(0, r);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,.6)';
+    ctx.beginPath();
+    ctx.moveTo(-.5 * r, -.62 * r); ctx.lineTo(-.15 * r, -.62 * r); ctx.lineTo(-.3 * r, -.3 * r);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawSky() {
+    const g = ctx.createLinearGradient(0, 0, 0, groundY + 20);
+    g.addColorStop(0, '#81d4fa'); g.addColorStop(1, '#e1f5fe');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, groundY + 20);
+
+    const cx = W * 0.2, outer = Math.min(groundY * 0.95, W * 0.19), bw = outer / 10;
+    ctx.lineWidth = bw; ctx.lineCap = 'butt';
+    COLORS.forEach((c, i) => {
+      ctx.strokeStyle = c.hex; ctx.globalAlpha = 0.8;
+      ctx.beginPath();
+      ctx.arc(cx, groundY, outer - i * bw - bw / 2, Math.PI, 0);
+      ctx.stroke();
+    });
+    ctx.globalAlpha = 1;
+
+    ctx.fillStyle = 'rgba(255,255,255,.9)';
+    [[0.15, 0.35, 10], [0.6, 0.2, 14], [0.85, 0.5, 8]].forEach(([fx, fy, sp]) => {
+      const x = ((fx * W + time * sp) % (W + 240)) - 120;
+      const y = groundY * fy, s = S * 1.2;
+      circle(x, y, 18 * s); circle(x + 20 * s, y - 8 * s, 22 * s);
+      circle(x + 44 * s, y, 18 * s); rr(x - 12 * s, y, 70 * s, 18 * s, 9 * s);
+    });
+  }
+
+  function drawGround() {
+    const g = ctx.createLinearGradient(0, groundY, 0, H);
+    g.addColorStop(0, '#a1887f'); g.addColorStop(1, '#6d4c41');
+    ctx.fillStyle = g; ctx.fillRect(0, groundY, W, H - groundY);
+    for (const d of dirt) {
+      ctx.fillStyle = d.light ? 'rgba(255,255,255,.14)' : 'rgba(0,0,0,.14)';
+      circle(d.x, d.y, d.r);
+    }
+    ctx.fillStyle = '#7cb342'; ctx.fillRect(0, groundY - 4, W, 18 * S);
+    ctx.fillStyle = '#558b2f'; ctx.fillRect(0, groundY + 12 * S, W, 4 * S);
+  }
+
+  function drawMiner() {
+    const s = S;
+    ctx.save(); ctx.translate(ox, groundY);
+    ctx.fillStyle = '#5d4037'; rr(-22 * s, -10 * s, 18 * s, 10 * s, 4 * s); rr(4 * s, -10 * s, 18 * s, 10 * s, 4 * s);
+    ctx.fillStyle = '#1e88e5'; rr(-24 * s, -58 * s, 48 * s, 50 * s, 12 * s);
+    ctx.fillStyle = '#ffcc80'; circle(-28 * s, -30 * s, 7 * s); circle(28 * s, -30 * s, 7 * s);
+    ctx.fillStyle = '#ffcc80'; circle(0, -80 * s, 22 * s);
+    ctx.fillStyle = '#fdd835';
+    ctx.beginPath(); ctx.arc(0, -84 * s, 23 * s, Math.PI, 0); ctx.fill();
+    rr(-28 * s, -86 * s, 56 * s, 7 * s, 3.5 * s);
+    ctx.fillStyle = '#fff'; circle(0, -98 * s, 5 * s);
+    ctx.fillStyle = '#4e342e'; circle(-8 * s, -77 * s, 3 * s); circle(8 * s, -77 * s, 3 * s);
+    ctx.fillStyle = 'rgba(255,112,67,.35)'; circle(-14 * s, -71 * s, 4.5 * s); circle(14 * s, -71 * s, 4.5 * s);
+    ctx.strokeStyle = '#4e342e'; ctx.lineWidth = 2.5 * s; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.arc(0, -73 * s, 8 * s, 0.15 * Math.PI, 0.85 * Math.PI); ctx.stroke();
+    ctx.fillStyle = '#78909c'; circle(0, -6 * s, 7 * s);
+    ctx.restore();
+  }
+
+  function drawHook() {
+    const p = tip();
+    ctx.strokeStyle = '#5d4037'; ctx.lineWidth = Math.max(3, 3.5 * S); ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(p.x, p.y); ctx.stroke();
+
+    if (carried) {
+      const off = carried.r * 0.7 + 12;
+      drawGem(p.x + Math.sin(ang) * off, p.y + Math.cos(ang) * off, carried.r, COLORS[carried.ci].hex);
+    }
+
+    ctx.save();
+    ctx.translate(p.x, p.y); ctx.rotate(-ang);
+    ctx.strokeStyle = '#455a64'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-17, 22); ctx.quadraticCurveTo(-19, 4, 0, 0); ctx.quadraticCurveTo(19, 4, 17, 22); ctx.stroke();
+    ctx.fillStyle = '#90a4ae'; circle(0, 0, 6);
+    ctx.restore();
+  }
+
+  function drawGems() {
+    gems.forEach(g => {
+      const k = 1 + 0.04 * Math.sin(time * 2 + g.ph);
+      drawGem(g.x, g.y, g.r * k, COLORS[g.ci].hex);
+      const a = 0.5 + 0.5 * Math.sin(time * 3 + g.ph);
+      ctx.strokeStyle = `rgba(255,255,255,${a})`; ctx.lineWidth = 2; ctx.lineCap = 'round';
+      const sx = g.x + g.r * 0.65, sy = g.y - g.r * 0.7, q = g.r * 0.28;
+      ctx.beginPath(); ctx.moveTo(sx - q, sy); ctx.lineTo(sx + q, sy); ctx.moveTo(sx, sy - q); ctx.lineTo(sx, sy + q); ctx.stroke();
+    });
+  }
+
+  function drawCelebrate() {
+    ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.fillRect(0, 0, W, H);
+    const c = COLORS[cel.gem.ci];
+    const e = Math.min(1, cel.t / 0.45);
+    const back = 1 + 2.70158 * Math.pow(e - 1, 3) + 1.70158 * Math.pow(e - 1, 2);
+    const base = Math.min(W, H) * 0.17;
+    const r = base * (0.3 + 0.7 * back) * (1 + 0.04 * Math.sin(cel.t * 8));
+    const cx = W / 2, cy = H * 0.42;
+    drawGem(cx, cy, r, c.hex);
+
+    let fs = Math.min(W, H) * 0.11;
+    ctx.font = `800 ${fs}px "Trebuchet MS","Comic Sans MS",system-ui,sans-serif`;
+    const w = ctx.measureText(c.say).width;
+    if (w > W * 0.9) { fs *= (W * 0.9) / w; ctx.font = `800 ${fs}px "Trebuchet MS","Comic Sans MS",system-ui,sans-serif`; }
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+    const ty = cy + base * 1.55;
+    ctx.lineWidth = fs * 0.22; ctx.strokeStyle = shade(c.hex, -0.5);
+    ctx.strokeText(c.say, cx, ty);
+    ctx.fillStyle = c.hex; ctx.fillText(c.say, cx, ty);
+  }
+
+  function drawParticles() {
+    for (const p of particles) {
+      ctx.globalAlpha = Math.max(0, p.life / p.max);
+      ctx.fillStyle = p.c;
+      circle(p.x, p.y, p.size);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function draw() {
+    drawSky();
+    drawGround();
+    drawGems();
+    drawMiner();
+    drawHook();
+    if (state === 'celebrate' && cel) drawCelebrate();
+    drawParticles();
+  }
+
+  let last = 0;
+  function frame(ts) {
+    const now = ts / 1000;
+    const dt = Math.min(0.05, last ? now - last : 0);
+    last = now; time = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  function start() {
+    if (started) return;
+    started = true;
+    overlay.classList.add('hide');
+    btn.style.display = 'grid';
+    startBgm();
+    speak('Chơi nào!');
+  }
+
+  document.getElementById('go').addEventListener('click', start);
+
+  window.addEventListener('keydown', e => {
+    if (e.code === 'ArrowDown' || e.code === 'Space' || e.code === 'Enter') {
+      e.preventDefault();
+      if (e.repeat) return;
+      if (!started) start(); else pull();
+    }
+  });
+  cv.addEventListener('pointerdown', e => { e.preventDefault(); pull(); });
+  btn.addEventListener('pointerdown', e => { e.preventDefault(); pull(); });
+
+  let rz;
+  window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(resize, 120); });
+
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
