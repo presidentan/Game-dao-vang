@@ -33,17 +33,20 @@
   #start {
     position: fixed; inset: 0; z-index: 5;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 28px; padding: 20px; text-align: center;
+    gap: 24px; padding: 20px; text-align: center;
     background: linear-gradient(#b3e5fc, #fff9c4);
     transition: opacity .3s;
   }
   #start.hide { opacity: 0; pointer-events: none; }
   #start h1 { margin: 0; font-size: clamp(34px, 8vw, 72px); line-height: 1.1; color: #5d4037; text-shadow: 0 4px 0 rgba(255,255,255,.8); }
-  #gemrow { display: flex; gap: clamp(8px, 2vw, 18px); }
+  #gemrow {
+    display: flex; flex-wrap: wrap; justify-content: center;
+    max-width: 520px; gap: clamp(8px, 2vw, 14px);
+  }
   #gemrow span {
-    width: clamp(26px, 6vw, 48px); height: clamp(26px, 6vw, 48px);
+    width: clamp(22px, 4.5vw, 36px); height: clamp(22px, 4.5vw, 36px);
     transform: rotate(45deg); border-radius: 22%;
-    border: 3px solid rgba(255,255,255,.8); box-shadow: 0 4px 8px rgba(0,0,0,.25);
+    border: 2.5px solid rgba(255,255,255,.85); box-shadow: 0 4px 8px rgba(0,0,0,.25);
     animation: bob 1.6s ease-in-out infinite;
   }
   @keyframes bob { 50% { transform: rotate(45deg) translateY(-8px) translateX(-8px); } }
@@ -77,6 +80,28 @@
 (() => {
   'use strict';
 
+  const RAINBOW_COUNT = 7;
+  // Số lượng viên ruby hiển thị cùng lúc trên sân
+  const ACTIVE_COUNT = 7;
+  // Số lượng viên đá hiển thị cùng lúc trên sân (từ bé đến lớn)
+  const ROCK_COUNT = 5;
+  // Khoảng thời gian xuất hiện ngẫu nhiên của thú (giây)
+  const PET_SPAWN_MIN = 15;
+  const PET_SPAWN_MAX = 30;
+  const PET_KINDS = ['cat', 'dog', 'mouse'];
+
+  const ROCK_ITEM = {
+    say: 'Hòn đá',
+    hex: '#78909c',
+    audio: 'audio/rock.mp3',
+  };
+
+  const PET_INFO = {
+    cat:   { say: 'Con mèo',      hex: '#ff9800', audio: 'audio/cat.mp3' },
+    dog:   { say: 'Con chó',      hex: '#8d6e63', audio: 'audio/dog.mp3' },
+    mouse: { say: 'Con chuột nâu', hex: '#795548', audio: 'audio/mouse.mp3' },
+  };
+
   const COLORS = [
     { say: 'Màu đỏ',         hex: '#e53935', audio: 'audio/red.mp3' },
     { say: 'Màu cam',        hex: '#fb8c00', audio: 'audio/orange.mp3' },
@@ -85,10 +110,20 @@
     { say: 'Màu xanh dương', hex: '#1e88e5', audio: 'audio/blue.mp3' },
     { say: 'Màu chàm',       hex: '#3949ab', audio: 'audio/indigo.mp3' },
     { say: 'Màu tím',        hex: '#8e24aa', audio: 'audio/violet.mp3' },
+    { say: 'Màu đen',        hex: '#212121', audio: 'audio/black.mp3' },
+    { say: 'Màu trắng',      hex: '#f5f5f5', audio: 'audio/white.mp3' },
+    { say: 'Màu đen xám',    hex: '#546e7a', audio: 'audio/dark-gray.mp3' },
+    { say: 'Màu nâu',        hex: '#6d4c41', audio: 'audio/brown.mp3' },
+    { say: 'Màu hồng',       hex: '#f06292', audio: 'audio/pink.mp3' },
+    { say: 'Màu bạc',        hex: '#cfd8dc', audio: 'audio/silver.mp3' },
   ];
 
   const AUDIO_MAP = {
     'Chơi nào!': 'audio/start.mp3',
+    [ROCK_ITEM.say]: ROCK_ITEM.audio,
+    [PET_INFO.cat.say]: PET_INFO.cat.audio,
+    [PET_INFO.dog.say]: PET_INFO.dog.audio,
+    [PET_INFO.mouse.say]: PET_INFO.mouse.audio,
   };
   COLORS.forEach(c => { AUDIO_MAP[c.say] = c.audio; });
 
@@ -96,7 +131,7 @@
   COLORS.forEach((c, i) => {
     const s = document.createElement('span');
     s.style.background = c.hex;
-    s.style.animationDelay = (i * 0.12) + 's';
+    s.style.animationDelay = (i * 0.08) + 's';
     gemrow.appendChild(s);
   });
 
@@ -164,8 +199,17 @@
   }
 
   let W, H, dpr, groundY, ox, oy, S, R, speed;
-  let gems = [], dirt = [];
+  let gems = [], rocks = [], pets = [], dirt = [];
+  let petTimers = {
+    cat: randomPetDelay(),
+    dog: randomPetDelay(),
+    mouse: randomPetDelay(),
+  };
   let lastW = 0, lastH = 0;
+
+  function randomPetDelay() {
+    return PET_SPAWN_MIN + Math.random() * (PET_SPAWN_MAX - PET_SPAWN_MIN);
+  }
 
   function makeDirt() {
     dirt = [];
@@ -180,20 +224,130 @@
     }
   }
 
-  function spawn(ci, others) {
-    const minY = groundY + 60 * S + R;
-    const maxY = H - R - 12;
-    let pos = null;
-    for (let k = 0; k < 300 && !pos; k++) {
-      const x = R + 12 + Math.random() * (W - 2 * R - 24);
-      const y = minY + Math.random() * Math.max(1, maxY - minY);
-      if (Math.atan2(Math.abs(x - ox), y - oy) > 1.12) continue;
-      if (y > H - 135 && Math.abs(x - W / 2) < 80) continue;
-      if (others.some(o => Math.hypot(o.x - x, o.y - y) < R * 2.8)) continue;
-      pos = { x, y };
+  function pickNextColorIndex(currentGems, excludeIndex = -1) {
+    const present = new Set(currentGems.map(g => g.ci));
+    const unseen = [];
+    for (let i = 0; i < COLORS.length; i++) {
+      if (!present.has(i)) unseen.push(i);
     }
-    if (!pos) pos = { x: ox + (Math.random() - 0.5) * W * 0.5, y: minY + Math.random() * Math.max(1, maxY - minY) };
-    return { ci, x: pos.x, y: pos.y, nx: pos.x / W, ny: pos.y / H, r: R, ph: Math.random() * 6.28 };
+    if (unseen.length > 0) {
+      return unseen[Math.floor(Math.random() * unseen.length)];
+    }
+    const candidates = [];
+    for (let i = 0; i < COLORS.length; i++) {
+      if (i !== excludeIndex) candidates.push(i);
+    }
+    return candidates.length
+      ? candidates[Math.floor(Math.random() * candidates.length)]
+      : Math.floor(Math.random() * COLORS.length);
+  }
+
+  function randomRockScale() {
+    return 0.65 + Math.random() * 1.0;
+  }
+
+  function findFreePos(itemR, others) {
+    const minY = groundY + 55 * S + itemR;
+    const maxY = H - itemR - 12;
+    for (let k = 0; k < 450; k++) {
+      const x = itemR + 12 + Math.random() * (W - 2 * itemR - 24);
+      const y = minY + Math.random() * Math.max(1, maxY - minY);
+      if (Math.atan2(Math.abs(x - ox), y - oy) > 1.15) continue;
+      if (y > H - 130 && Math.abs(x - W / 2) < 76) continue;
+      if (others.some(o => Math.hypot(o.x - x, o.y - y) < (o.r + itemR) * 1.25)) continue;
+      return { x, y };
+    }
+    return {
+      x: ox + (Math.random() - 0.5) * Math.max(80, W * 0.55),
+      y: minY + Math.random() * Math.max(1, maxY - minY),
+    };
+  }
+
+  function spawn(ci, others) {
+    const pos = findFreePos(R, others);
+    return {
+      type: 'gem',
+      ci,
+      x: pos.x,
+      y: pos.y,
+      nx: pos.x / W,
+      ny: pos.y / H,
+      r: R,
+      ph: Math.random() * 6.28,
+    };
+  }
+
+  function spawnRock(others, scale = randomRockScale()) {
+    const rrSize = R * scale;
+    const pos = findFreePos(rrSize, others);
+    const verts = [];
+    const pts = 7;
+    for (let i = 0; i < pts; i++) {
+      const a = (i / pts) * Math.PI * 2;
+      const rad = 0.78 + Math.random() * 0.28;
+      verts.push({ x: Math.cos(a) * rad, y: Math.sin(a) * rad });
+    }
+    return {
+      type: 'rock',
+      scale,
+      x: pos.x,
+      y: pos.y,
+      nx: pos.x / W,
+      ny: pos.y / H,
+      r: rrSize,
+      rot: (Math.random() - 0.5) * 0.6,
+      verts,
+    };
+  }
+
+  function getPetRadius(kind) {
+    return kind === 'mouse' ? R * 0.68 : R * 0.78;
+  }
+
+  function spawnPet(kind) {
+    const petR = getPetRadius(kind);
+    const minY = groundY + 65 * S + petR;
+    const maxY = Math.max(minY + 20, H - petR - 24);
+    const y = minY + Math.random() * (maxY - minY);
+    const dir = Math.random() < 0.5 ? 1 : -1;
+    const x = dir === 1 ? -petR * 1.5 : W + petR * 1.5;
+    const baseSpeed = kind === 'mouse' ? 85 + Math.random() * 40 : 68 + Math.random() * 34;
+    const walkSpeed = baseSpeed * S;
+    const minX = Math.max(petR * 1.4, W * 0.12);
+    const maxX = Math.min(W - petR * 1.4, W * 0.88);
+    pets.push({
+      type: 'pet',
+      kind,
+      x,
+      y,
+      r: petR,
+      dir,
+      walkSpeed,
+      minX,
+      maxX,
+      turnsLeft: 2 + Math.floor(Math.random() * 3),
+      step: Math.random() * 6.28,
+    });
+  }
+
+  function initItems() {
+    const gemCount = Math.min(ACTIVE_COUNT, COLORS.length);
+    const chosen = [];
+    while (chosen.length < gemCount) {
+      const idx = Math.floor(Math.random() * COLORS.length);
+      if (!chosen.includes(idx)) chosen.push(idx);
+    }
+    gems = [];
+    chosen.forEach(ci => gems.push(spawn(ci, [...gems, ...rocks])));
+
+    rocks = [];
+    for (let i = 0; i < ROCK_COUNT; i++) {
+      const presetScale = ROCK_COUNT > 1
+        ? 0.65 + (i / (ROCK_COUNT - 1)) * 1.0 + (Math.random() - 0.5) * 0.12
+        : randomRockScale();
+      const clamped = Math.max(0.6, Math.min(1.7, presetScale));
+      rocks.push(spawnRock([...gems, ...rocks], clamped));
+    }
   }
 
   function resize() {
@@ -205,16 +359,21 @@
     groundY = Math.max(120, H * 0.2);
     S = Math.max(0.7, Math.min(1.4, Math.min(W, H) / 520));
     ox = W / 2; oy = groundY - 6 * S;
-    R = Math.max(22, Math.min(42, Math.min(W, H) * 0.055));
+    R = Math.max(15, Math.min(28, Math.min(W, H) * 0.036));
     speed = Math.max(380, Math.min(W, H) * 0.75);
     makeDirt();
 
     const ratioChanged = !lastW || Math.abs((W / H) / (lastW / lastH) - 1) > 0.25;
-    if (ratioChanged || gems.length === 0) {
-      gems = [];
-      COLORS.forEach((_, i) => gems.push(spawn(i, gems)));
+    if (ratioChanged || (gems.length === 0 && rocks.length === 0)) {
+      initItems();
     } else {
       gems.forEach(g => { g.x = g.nx * W; g.y = g.ny * H; g.r = R; });
+      rocks.forEach(rk => { rk.x = rk.nx * W; rk.y = rk.ny * H; rk.r = R * rk.scale; });
+      pets.forEach(pt => {
+        pt.r = getPetRadius(pt.kind);
+        pt.minX = Math.max(pt.r * 1.4, W * 0.12);
+        pt.maxX = Math.min(W - pt.r * 1.4, W * 0.88);
+      });
     }
     lastW = W; lastH = H;
     carried = null; cel = null; len = 0;
@@ -242,11 +401,20 @@
   }
 
   function startCelebrate() {
+    if (carried.type === 'rock') {
+      speak(ROCK_ITEM.say);
+      rocks.push(spawnRock([...gems, ...rocks]));
+      carried = null;
+      setState('swing');
+      return;
+    }
+
     setState('celebrate');
-    const my = { t: 0, speechDone: false, gem: carried };
+    const info = carried.type === 'pet' ? PET_INFO[carried.kind] : COLORS[carried.ci];
+    const my = { t: 0, speechDone: false, item: carried };
     cel = my;
-    speak(COLORS[carried.ci].say, () => { my.speechDone = true; });
-    const cx = W / 2, cy = H * 0.42, hex = COLORS[carried.ci].hex;
+    speak(info.say, () => { my.speechDone = true; });
+    const cx = W / 2, cy = H * 0.42, hex = info.hex;
     for (let i = 0; i < 32; i++) {
       const a = Math.random() * Math.PI * 2, v = 150 + Math.random() * 300;
       particles.push({
@@ -257,25 +425,101 @@
     }
   }
 
+  function updatePets(dt) {
+    if (!started) return;
+
+    for (const kind of PET_KINDS) {
+      const alreadyActive = pets.some(p => p.kind === kind) || (carried && carried.type === 'pet' && carried.kind === kind);
+      if (!alreadyActive) {
+        petTimers[kind] -= dt;
+        if (petTimers[kind] <= 0) {
+          spawnPet(kind);
+          petTimers[kind] = randomPetDelay();
+        }
+      }
+    }
+
+    for (let i = pets.length - 1; i >= 0; i--) {
+      const pt = pets[i];
+      pt.x += pt.dir * pt.walkSpeed * dt;
+      pt.step += dt * (pt.kind === 'mouse' ? 15 : 11);
+
+      if (pt.turnsLeft > 0) {
+        if (pt.dir === 1 && pt.x >= pt.maxX) {
+          pt.x = pt.maxX;
+          pt.dir = -1;
+          pt.turnsLeft--;
+        } else if (pt.dir === -1 && pt.x <= pt.minX) {
+          pt.x = pt.minX;
+          pt.dir = 1;
+          pt.turnsLeft--;
+        }
+      } else {
+        const outLeft = pt.dir === -1 && pt.x < -pt.r * 2.5;
+        const outRight = pt.dir === 1 && pt.x > W + pt.r * 2.5;
+        if (outLeft || outRight) {
+          pets.splice(i, 1);
+        }
+      }
+    }
+  }
+
   function update(dt) {
+    updatePets(dt);
+
     if (state === 'swing') {
       t += dt;
       ang = MAXA * Math.sin(t * 1.4);
     } else if (state === 'extend') {
       len += speed * dt;
       const p = tip();
+      const hitPad = 7 * S;
+      let caught = false;
+
       for (let i = 0; i < gems.length; i++) {
         const g = gems[i];
-        if (Math.hypot(p.x - g.x, p.y - g.y) < g.r + 14) {
+        if (Math.hypot(p.x - g.x, p.y - g.y) < g.r + hitPad) {
           carried = g;
           gems.splice(i, 1);
-          setState('retract');
+          caught = true;
           break;
         }
       }
-      if (state === 'extend' && (p.x < -5 || p.x > W + 5 || p.y > H + 5)) setState('retract');
+
+      if (!caught) {
+        for (let i = 0; i < pets.length; i++) {
+          const pt = pets[i];
+          if (Math.hypot(p.x - pt.x, p.y - pt.y) < pt.r + hitPad) {
+            carried = pt;
+            pets.splice(i, 1);
+            caught = true;
+            break;
+          }
+        }
+      }
+
+      if (!caught) {
+        for (let i = 0; i < rocks.length; i++) {
+          const rk = rocks[i];
+          if (Math.hypot(p.x - rk.x, p.y - rk.y) < rk.r * 0.88 + hitPad) {
+            carried = rk;
+            rocks.splice(i, 1);
+            caught = true;
+            break;
+          }
+        }
+      }
+
+      if (caught) {
+        setState('retract');
+      } else if (p.x < -5 || p.x > W + 5 || p.y > H + 5) {
+        setState('retract');
+      }
     } else if (state === 'retract') {
-      len -= speed * (carried ? 0.85 : 1.3) * dt;
+      const weightFactor = carried
+        ? (carried.type === 'rock' ? Math.max(0.45, 0.85 - (carried.scale - 0.65) * 0.35) : 0.85)
+        : 1.3;
+      len -= speed * weightFactor * dt;
       if (len <= 0) {
         len = 0;
         if (carried) startCelebrate(); else setState('swing');
@@ -283,7 +527,10 @@
     } else if (state === 'celebrate') {
       cel.t += dt;
       if (cel.t >= 1.8 && cel.speechDone) {
-        gems.push(spawn(cel.gem.ci, gems));
+        if (cel.item.type === 'gem') {
+          const nextCi = pickNextColorIndex(gems, cel.item.ci);
+          gems.push(spawn(nextCi, [...gems, ...rocks]));
+        }
         carried = null; cel = null;
         setState('swing');
       }
@@ -330,6 +577,243 @@
     ctx.restore();
   }
 
+  function drawRock(x, y, r, rot = 0, verts = null) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rot);
+    const pts = verts || [
+      { x: -0.75, y: -0.55 },
+      { x: 0.15,  y: -0.88 },
+      { x: 0.88,  y: -0.35 },
+      { x: 0.78,  y: 0.58  },
+      { x: -0.1,  y: 0.86  },
+      { x: -0.85, y: 0.35  },
+    ];
+    ctx.beginPath();
+    pts.forEach((p, i) => i ? ctx.lineTo(p.x * r, p.y * r) : ctx.moveTo(p.x * r, p.y * r));
+    ctx.closePath();
+
+    const g = ctx.createLinearGradient(-r, -r, r, r);
+    g.addColorStop(0, '#b0bec5');
+    g.addColorStop(0.55, '#78909c');
+    g.addColorStop(1, '#455a64');
+    ctx.fillStyle = g;
+    ctx.fill();
+
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = Math.max(2, r * 0.08);
+    ctx.strokeStyle = '#37474f';
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+    ctx.lineWidth = Math.max(1.2, r * 0.05);
+    ctx.beginPath();
+    ctx.moveTo(-0.35 * r, -0.35 * r);
+    ctx.lineTo(0.15 * r, -0.05 * r);
+    ctx.lineTo(-0.05 * r, 0.35 * r);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  // Vẽ mèo, cún hoặc chuột nâu; mặc định đầu quay sang phải (+x)
+  function drawPet(x, y, r, kind, dir = 1, step = 0) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(dir, 1);
+
+    if (kind === 'mouse') {
+      const u = r * 0.92;
+      const legSwing = Math.sin(step) * 0.22 * u;
+      const tailCurve = Math.sin(step * 1.3) * 0.25 * u;
+
+      // Đuôi mảnh cong lên
+      ctx.strokeStyle = '#a1887f';
+      ctx.lineWidth = Math.max(1.6, 0.1 * u);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-0.75 * u, 0.12 * u);
+      ctx.quadraticCurveTo(-1.15 * u, -0.15 * u + tailCurve, -1.05 * u, -0.52 * u);
+      ctx.stroke();
+
+      // Chân nhỏ
+      ctx.fillStyle = '#5d4037';
+      rr(-0.45 * u + legSwing, 0.26 * u, 0.18 * u, 0.24 * u, 0.07 * u);
+      rr(0.22 * u - legSwing, 0.26 * u, 0.18 * u, 0.24 * u, 0.07 * u);
+
+      // Thân chuột nâu tròn nhỏ
+      ctx.fillStyle = '#795548';
+      rr(-0.78 * u, -0.26 * u, 1.45 * u, 0.62 * u, 0.32 * u);
+
+      // Tai tròn màu hồng nhạt bên trong
+      ctx.fillStyle = '#6d4c41';
+      circle(0.32 * u, -0.38 * u, 0.28 * u);
+      ctx.fillStyle = '#f48fb1';
+      circle(0.35 * u, -0.36 * u, 0.17 * u);
+
+      // Mắt đen & mũi hồng xinh
+      ctx.fillStyle = '#1a1a1a';
+      circle(0.46 * u, -0.06 * u, 0.075 * u);
+      ctx.fillStyle = '#fff';
+      circle(0.49 * u, -0.09 * u, 0.025 * u);
+
+      ctx.fillStyle = '#ff80ab';
+      circle(0.72 * u, 0.05 * u, 0.07 * u);
+
+      // Râu chuột
+      ctx.strokeStyle = '#4e342e';
+      ctx.lineWidth = Math.max(1, 0.04 * u);
+      ctx.beginPath();
+      ctx.moveTo(0.45 * u, 0.08 * u); ctx.lineTo(0.15 * u, 0.02 * u);
+      ctx.moveTo(0.45 * u, 0.15 * u); ctx.lineTo(0.15 * u, 0.18 * u);
+      ctx.moveTo(0.68 * u, 0.12 * u); ctx.lineTo(0.95 * u, 0.06 * u);
+      ctx.moveTo(0.68 * u, 0.18 * u); ctx.lineTo(0.95 * u, 0.22 * u);
+      ctx.stroke();
+
+      ctx.restore();
+      return;
+    }
+
+    if (kind === 'dog') {
+      const u = r * 0.86;
+      const legSwing = Math.sin(step) * 0.25 * u;
+      const tailWag = Math.sin(step * 1.4) * 0.35;
+
+      // Đuôi cún vẫy cao
+      ctx.save();
+      ctx.translate(-0.68 * u, -0.14 * u);
+      ctx.rotate(-0.45 + tailWag);
+      ctx.strokeStyle = '#6d4c41';
+      ctx.lineWidth = Math.max(2.2, 0.17 * u);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.quadraticCurveTo(-0.22 * u, -0.35 * u, -0.08 * u, -0.62 * u);
+      ctx.stroke();
+      ctx.restore();
+
+      // 4 chân cún
+      ctx.fillStyle = '#6d4c41';
+      rr(-0.52 * u + legSwing, 0.24 * u, 0.22 * u, 0.42 * u, 0.09 * u);
+      rr(-0.2 * u - legSwing, 0.24 * u, 0.22 * u, 0.42 * u, 0.09 * u);
+      rr(0.2 * u + legSwing, 0.24 * u, 0.22 * u, 0.42 * u, 0.09 * u);
+      rr(0.46 * u - legSwing, 0.24 * u, 0.22 * u, 0.42 * u, 0.09 * u);
+
+      // Thân cún vàng nâu
+      ctx.fillStyle = '#c68b59';
+      rr(-0.68 * u, -0.24 * u, 1.3 * u, 0.6 * u, 0.28 * u);
+
+      // Vòng cổ xanh + thẻ vàng nhỏ
+      ctx.fillStyle = '#1e88e5';
+      rr(0.28 * u, -0.25 * u, 0.16 * u, 0.56 * u, 0.06 * u);
+      ctx.fillStyle = '#fdd835';
+      circle(0.42 * u, 0.16 * u, 0.09 * u);
+
+      // Đầu cún
+      const hx = 0.54 * u, hy = -0.34 * u;
+      ctx.fillStyle = '#c68b59';
+      circle(hx, hy, 0.44 * u);
+
+      // Mõm sáng màu
+      ctx.fillStyle = '#f5e6cc';
+      rr(hx + 0.02 * u, hy - 0.02 * u, 0.52 * u, 0.34 * u, 0.16 * u);
+
+      // Tai cụp nâu đậm
+      ctx.fillStyle = '#6d4c41';
+      rr(hx - 0.34 * u, hy - 0.24 * u, 0.26 * u, 0.54 * u, 0.12 * u);
+
+      // Mắt & mũi đen bóng
+      ctx.fillStyle = '#263238';
+      circle(hx + 0.14 * u, hy - 0.1 * u, 0.075 * u);
+      ctx.fillStyle = '#fff';
+      circle(hx + 0.17 * u, hy - 0.13 * u, 0.025 * u);
+
+      ctx.fillStyle = '#212121';
+      circle(hx + 0.46 * u, hy + 0.05 * u, 0.08 * u);
+
+      ctx.restore();
+      return;
+    }
+
+    // Mèo
+    const u = r * 0.85;
+    const legSwing = Math.sin(step) * 0.25 * u;
+    const tailWag = Math.sin(step * 1.2) * 0.28;
+    const bodyCol = '#ffa726';
+    const darkCol = '#ef6c00';
+
+    ctx.save();
+    ctx.translate(-0.72 * u, -0.1 * u);
+    ctx.rotate(tailWag);
+    ctx.strokeStyle = darkCol;
+    ctx.lineWidth = Math.max(2, 0.16 * u);
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(-0.35 * u, -0.45 * u, -0.22 * u, -0.75 * u);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.fillStyle = darkCol;
+    rr(-0.52 * u + legSwing, 0.25 * u, 0.22 * u, 0.42 * u, 0.08 * u);
+    rr(-0.18 * u - legSwing, 0.25 * u, 0.22 * u, 0.42 * u, 0.08 * u);
+    rr(0.22 * u + legSwing, 0.25 * u, 0.22 * u, 0.42 * u, 0.08 * u);
+    rr(0.48 * u - legSwing, 0.25 * u, 0.22 * u, 0.42 * u, 0.08 * u);
+
+    ctx.fillStyle = bodyCol;
+    rr(-0.68 * u, -0.25 * u, 1.32 * u, 0.62 * u, 0.28 * u);
+
+    const hx = 0.56 * u, hy = -0.35 * u;
+    ctx.fillStyle = bodyCol;
+    ctx.beginPath();
+    ctx.moveTo(hx - 0.36 * u, hy - 0.12 * u);
+    ctx.lineTo(hx - 0.42 * u, hy - 0.58 * u);
+    ctx.lineTo(hx - 0.06 * u, hy - 0.36 * u);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(hx + 0.08 * u, hy - 0.36 * u);
+    ctx.lineTo(hx + 0.36 * u, hy - 0.58 * u);
+    ctx.lineTo(hx + 0.38 * u, hy - 0.12 * u);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = bodyCol;
+    circle(hx, hy, 0.44 * u);
+
+    ctx.fillStyle = '#263238';
+    circle(hx + 0.02 * u, hy - 0.05 * u, 0.07 * u);
+    circle(hx + 0.28 * u, hy - 0.05 * u, 0.07 * u);
+    ctx.fillStyle = '#f06292';
+    circle(hx + 0.16 * u, hy + 0.09 * u, 0.065 * u);
+
+    ctx.strokeStyle = '#4e342e';
+    ctx.lineWidth = Math.max(1, 0.04 * u);
+    ctx.beginPath();
+    ctx.moveTo(hx - 0.15 * u, hy + 0.06 * u); ctx.lineTo(hx - 0.45 * u, hy + 0.02 * u);
+    ctx.moveTo(hx - 0.15 * u, hy + 0.14 * u); ctx.lineTo(hx - 0.45 * u, hy + 0.18 * u);
+    ctx.moveTo(hx + 0.35 * u, hy + 0.06 * u); ctx.lineTo(hx + 0.58 * u, hy + 0.02 * u);
+    ctx.moveTo(hx + 0.35 * u, hy + 0.14 * u); ctx.lineTo(hx + 0.58 * u, hy + 0.18 * u);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawCarriedItem(p, hs) {
+    if (!carried) return;
+    const off = carried.r * 0.72 + 14 * hs;
+    const ix = p.x + Math.sin(ang) * off;
+    const iy = p.y + Math.cos(ang) * off;
+    if (carried.type === 'rock') {
+      drawRock(ix, iy, carried.r, carried.rot - ang, carried.verts);
+    } else if (carried.type === 'pet') {
+      drawPet(ix, iy, carried.r, carried.kind, carried.dir, carried.step);
+    } else {
+      drawGem(ix, iy, carried.r, COLORS[carried.ci].hex);
+    }
+  }
+
   function drawSky() {
     const g = ctx.createLinearGradient(0, 0, 0, groundY + 20);
     g.addColorStop(0, '#81d4fa'); g.addColorStop(1, '#e1f5fe');
@@ -337,7 +821,7 @@
 
     const cx = W * 0.2, outer = Math.min(groundY * 0.95, W * 0.19), bw = outer / 10;
     ctx.lineWidth = bw; ctx.lineCap = 'butt';
-    COLORS.forEach((c, i) => {
+    COLORS.slice(0, RAINBOW_COUNT).forEach((c, i) => {
       ctx.strokeStyle = c.hex; ctx.globalAlpha = 0.8;
       ctx.beginPath();
       ctx.arc(cx, groundY, outer - i * bw - bw / 2, Math.PI, 0);
@@ -387,20 +871,30 @@
 
   function drawHook() {
     const p = tip();
-    ctx.strokeStyle = '#5d4037'; ctx.lineWidth = Math.max(3, 3.5 * S); ctx.lineCap = 'round';
+    const hs = S * 0.65;
+    ctx.strokeStyle = '#5d4037'; ctx.lineWidth = Math.max(2.5, 3 * hs); ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(p.x, p.y); ctx.stroke();
 
-    if (carried) {
-      const off = carried.r * 0.7 + 12;
-      drawGem(p.x + Math.sin(ang) * off, p.y + Math.cos(ang) * off, carried.r, COLORS[carried.ci].hex);
-    }
+    drawCarriedItem(p, hs);
 
     ctx.save();
-    ctx.translate(p.x, p.y); ctx.rotate(-ang);
+    ctx.translate(p.x, p.y); ctx.rotate(-ang); ctx.scale(hs, hs);
     ctx.strokeStyle = '#455a64'; ctx.lineWidth = 5; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(-17, 22); ctx.quadraticCurveTo(-19, 4, 0, 0); ctx.quadraticCurveTo(19, 4, 17, 22); ctx.stroke();
     ctx.fillStyle = '#90a4ae'; circle(0, 0, 6);
     ctx.restore();
+  }
+
+  function drawRocks() {
+    rocks.forEach(rk => {
+      drawRock(rk.x, rk.y, rk.r, rk.rot, rk.verts);
+    });
+  }
+
+  function drawPets() {
+    pets.forEach(pt => {
+      drawPet(pt.x, pt.y, pt.r, pt.kind, pt.dir, pt.step);
+    });
   }
 
   function drawGems() {
@@ -408,31 +902,39 @@
       const k = 1 + 0.04 * Math.sin(time * 2 + g.ph);
       drawGem(g.x, g.y, g.r * k, COLORS[g.ci].hex);
       const a = 0.5 + 0.5 * Math.sin(time * 3 + g.ph);
-      ctx.strokeStyle = `rgba(255,255,255,${a})`; ctx.lineWidth = 2; ctx.lineCap = 'round';
+      ctx.strokeStyle = `rgba(255,255,255,${a})`; ctx.lineWidth = 1.8; ctx.lineCap = 'round';
       const sx = g.x + g.r * 0.65, sy = g.y - g.r * 0.7, q = g.r * 0.28;
       ctx.beginPath(); ctx.moveTo(sx - q, sy); ctx.lineTo(sx + q, sy); ctx.moveTo(sx, sy - q); ctx.lineTo(sx, sy + q); ctx.stroke();
     });
   }
 
   function drawCelebrate() {
+    if (!cel || cel.item.type === 'rock') return;
     ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.fillRect(0, 0, W, H);
-    const c = COLORS[cel.gem.ci];
+    const info = cel.item.type === 'pet' ? PET_INFO[cel.item.kind] : COLORS[cel.item.ci];
     const e = Math.min(1, cel.t / 0.45);
     const back = 1 + 2.70158 * Math.pow(e - 1, 3) + 1.70158 * Math.pow(e - 1, 2);
-    const base = Math.min(W, H) * 0.17;
+    const base = Math.min(W, H) * 0.14;
     const r = base * (0.3 + 0.7 * back) * (1 + 0.04 * Math.sin(cel.t * 8));
     const cx = W / 2, cy = H * 0.42;
-    drawGem(cx, cy, r, c.hex);
+
+    if (cel.item.type === 'pet') {
+      drawPet(cx, cy, r, cel.item.kind, 1, cel.t * 10);
+    } else {
+      drawGem(cx, cy, r, info.hex);
+    }
 
     let fs = Math.min(W, H) * 0.11;
     ctx.font = `800 ${fs}px "Trebuchet MS","Comic Sans MS",system-ui,sans-serif`;
-    const w = ctx.measureText(c.say).width;
+    const w = ctx.measureText(info.say).width;
     if (w > W * 0.9) { fs *= (W * 0.9) / w; ctx.font = `800 ${fs}px "Trebuchet MS","Comic Sans MS",system-ui,sans-serif`; }
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
-    const ty = cy + base * 1.55;
-    ctx.lineWidth = fs * 0.22; ctx.strokeStyle = shade(c.hex, -0.5);
-    ctx.strokeText(c.say, cx, ty);
-    ctx.fillStyle = c.hex; ctx.fillText(c.say, cx, ty);
+    const ty = cy + base * 1.65;
+    ctx.lineWidth = fs * 0.22;
+    const isLight = info.hex === '#f5f5f5' || info.hex === '#cfd8dc';
+    ctx.strokeStyle = isLight ? '#455a64' : shade(info.hex, -0.5);
+    ctx.strokeText(info.say, cx, ty);
+    ctx.fillStyle = info.hex; ctx.fillText(info.say, cx, ty);
   }
 
   function drawParticles() {
@@ -447,6 +949,8 @@
   function draw() {
     drawSky();
     drawGround();
+    drawRocks();
+    drawPets();
     drawGems();
     drawMiner();
     drawHook();
